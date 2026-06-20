@@ -1,0 +1,8 @@
+# PyTorch for the Transformer model
+torch>=2.0.0
+
+# Hugging Face Datasets for loading opus_books
+datasets>=2.14.0
+
+# Advanced regular expressions for your RegexTokenizer
+regex>=2023.8.8
