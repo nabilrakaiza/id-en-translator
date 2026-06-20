@@ -87,8 +87,9 @@ class RegexTokenizer:
 
         return tokens_list, merges, vocab
 
-    def train(self, text, vocab_size, verbose=False):
+    def train(self, corpus, vocab_size, verbose=False):
         self.is_trained = True 
+        text = " ".join(corpus)
         splits = re.findall(self.GPT4_SPLIT_PATTERN, text)
         tokens_splits = [list(map(int, split.encode("utf-8"))) for split in splits]
 

@@ -23,7 +23,7 @@ def main():
 
     # 1. Load Data
     print("Loading opus_books dataset...")
-    raw_dataset = load_dataset("opus_books", "en-id", split="train[:5000]") # Subset for quick testing
+    raw_dataset = load_dataset("Helsinki-NLP/opus-100", "en-id", split="train[:5000]") # Subset for quick testing
 
     # 2. Tokenizer Setup
     src_tokenizer_path = "weights/src_tokenizer.pkl"
