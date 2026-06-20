@@ -266,7 +266,8 @@ class EncoderDecoder(nn.Module):
 
     def forward(self, src, tgt, src_mask, tgt_mask):
         memory = self.encode(src, src_mask)
-        return self.decode(memory, src_mask, tgt, tgt_mask)
+        decoded = self.decode(memory, src_mask, tgt, tgt_mask)
+        return self.generator(decoded)
 
     def encode(self, src, src_mask):
         return self.encoder(self.src_embed(src), src_mask)

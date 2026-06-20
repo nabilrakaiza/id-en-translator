@@ -55,7 +55,7 @@ def main():
     model = build_transformer(TOTAL_VOCAB, TOTAL_VOCAB, N=6, d_model=512, d_ff=2048, h=8, dropout=0.1)
     model.to(DEVICE)
 
-    criterion = nn.CrossEntropyLoss(ignore_index=SPECIAL_TOKENS["[PAD]"])
+    criterion = nn.NLLLoss(ignore_index=SPECIAL_TOKENS["[PAD]"])
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, betas=(0.9, 0.98), eps=1e-9)
 
     # 5. Training Loop
