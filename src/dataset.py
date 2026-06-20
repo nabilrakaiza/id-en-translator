@@ -14,9 +14,9 @@ class TranslationDataset(Dataset):
         self.max_len = max_len
         
         # Special token indices
-        self.pad_idx = 8000
-        self.sos_idx = 8001
-        self.eos_idx = 8002
+        self.pad_idx = 16000
+        self.sos_idx = 16001
+        self.eos_idx = 16002
 
     def __len__(self):
         return len(self.dataset)
@@ -30,13 +30,13 @@ class TranslationDataset(Dataset):
         src_ids = self.src_tokenizer.encode(src_text)
         tgt_ids = self.tgt_tokenizer.encode(tgt_text)
 
-        # Add SOS and EOS
+        # cutting out by max length
+        src_ids = src_ids[:self.max_len - 2]  # -2 to leave room for SOS and EOS
+        tgt_ids = tgt_ids[:self.max_len - 2]
+
+        # adding SOS and EOS
         src_tokens = [self.sos_idx] + src_ids + [self.eos_idx]
         tgt_tokens = [self.sos_idx] + tgt_ids + [self.eos_idx]
-
-        # Truncate
-        src_tokens = src_tokens[:self.max_len]
-        tgt_tokens = tgt_tokens[:self.max_len]
 
         # Pad
         src_padding = self.max_len - len(src_tokens)
