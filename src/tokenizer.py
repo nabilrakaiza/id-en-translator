@@ -88,10 +88,13 @@ class RegexTokenizer:
         return tokens_list, merges, vocab
 
     def train(self, corpus, vocab_size, verbose=False):
-        self.is_trained = True 
-        text = " ".join(corpus)
-        splits = re.findall(self.GPT4_SPLIT_PATTERN, text)
-        tokens_splits = [list(map(int, split.encode("utf-8"))) for split in splits]
+        self.is_trained = True
+        tokens_splits = []
+        for i, text in enumerate(corpus):
+            if i >= 5000:  # only use 5k sentences for BPE training
+                break
+            splits = re.findall(self.GPT4_SPLIT_PATTERN, text)
+            tokens_splits.extend([list(map(int, s.encode("utf-8"))) for s in splits])
 
         new_tokens_list, merges, vocab = self._bpe(tokens_splits, 256, vocab_size, verbose)
         self.merges = merges
