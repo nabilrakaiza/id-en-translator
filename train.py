@@ -1,4 +1,5 @@
 import os
+import glob
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -130,14 +131,21 @@ def main():
             print(f"  {s} → {translate(s, model, src_tokenizer, tgt_tokenizer)}")
 
         # Save checkpoint
+        new_checkpoint_path = os.path.join(CHECKPOINT_DIR, f"transformer_epoch_{epoch+1}.pt")
         torch.save({
             "epoch": epoch,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
             "loss": avg_loss,
-        }, os.path.join(CHECKPOINT_DIR, f"transformer_epoch_{epoch+1}.pt"))
+        }, new_checkpoint_path)
         print(f"Checkpoint saved: transformer_epoch_{epoch+1}.pt")
+
+        # Delete old checkpoints, keep only latest
+        old_checkpoints = sorted(glob.glob(os.path.join(CHECKPOINT_DIR, "transformer_epoch_*.pt")))
+        for old in old_checkpoints[:-1]:
+            os.remove(old)
+            print(f"Deleted old checkpoint: {os.path.basename(old)}")
 
 if __name__ == "__main__":
     main()
