@@ -5,6 +5,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from datasets import load_dataset
 import pickle
+import re
 
 from src import RegexTokenizer, TranslationDataset, get_corpus_iterator, build_transformer
 from src.utils import causal_mask, save_checkpoint
@@ -142,7 +143,10 @@ def main():
         print(f"Checkpoint saved: transformer_epoch_{epoch+1}.pt")
 
         # Delete old checkpoints, keep only latest
-        old_checkpoints = sorted(glob.glob(os.path.join(CHECKPOINT_DIR, "transformer_epoch_*.pt")))
+        old_checkpoints = sorted(
+            glob.glob(os.path.join(CHECKPOINT_DIR, "transformer_epoch_*.pt")),
+            key=lambda x: int(re.search(r"epoch_(\d+)\.pt", x).group(1))
+        )
         for old in old_checkpoints[:-1]:
             os.remove(old)
             print(f"Deleted old checkpoint: {os.path.basename(old)}")
