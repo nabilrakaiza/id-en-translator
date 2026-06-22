@@ -6,3 +6,5 @@ datasets>=2.14.0
 
 # Advanced regular expressions for your RegexTokenizer
 regex>=2023.8.8
+
+sacrebleu

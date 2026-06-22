@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 from datasets import load_dataset
 import pickle
 import re
+import sacrebleu
 
 from src import RegexTokenizer, TranslationDataset, get_corpus_iterator, build_transformer
 from src.utils import causal_mask, save_checkpoint
@@ -17,7 +18,7 @@ SPECIAL_TOKENS = {"[PAD]": 16000, "[SOS]": 16001, "[EOS]": 16002}
 TOTAL_VOCAB = VOCAB_SIZE + 3
 MAX_LEN = 128
 BATCH_SIZE = 32
-EPOCHS = 40
+EPOCHS = 45
 D_MODEL = 512
 WARMUP_STEPS = 4000
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -29,6 +30,76 @@ def rate(step, d_model=D_MODEL, warmup=WARMUP_STEPS):
         step = 1
     return (d_model ** -0.5) * min(step ** -0.5, step * warmup ** -1.5)
 
+def evaluate(model, loader, criterion, src_tokenizer, tgt_tokenizer):
+    model.eval()
+
+    total_loss = 0
+
+    predictions = []
+    references = []
+
+    with torch.no_grad():
+        for batch in loader:
+            encoder_input = batch["encoder_input"].to(DEVICE)
+            decoder_input = batch["decoder_input"].to(DEVICE)
+            label = batch["label"].to(DEVICE)
+
+            src_mask = batch["src_mask"].to(DEVICE)
+
+            tgt_pad_mask = batch["tgt_pad_mask"].to(DEVICE)
+            tgt_causal_mask = causal_mask(decoder_input.size(1)).to(DEVICE)
+            tgt_mask = tgt_pad_mask & tgt_causal_mask
+
+            out = model(encoder_input, decoder_input, src_mask, tgt_mask)
+
+            loss = criterion(out.view(-1, out.size(-1)), label.view(-1))
+            total_loss += loss.item()
+
+            # BLEU evaluation
+            batch_size = encoder_input.size(0)
+            for i in range(batch_size):
+                # Decode source sentence
+                src_ids = encoder_input[i].tolist()
+                src_ids = [
+                    x for x in src_ids
+                    if x not in SPECIAL_TOKENS.values()
+                ]
+
+                src_text = src_tokenizer.decode(src_ids)
+
+                # Translate using greedy decoding
+                pred = translate(
+                    src_text,
+                    model,
+                    src_tokenizer,
+                    tgt_tokenizer
+                )
+
+                predictions.append(pred)
+
+                # Decode reference
+                ref_ids = label[i].tolist()
+                ref = []
+
+                for token in ref_ids:
+                    if token == SPECIAL_TOKENS["[EOS]"]:
+                        break
+                    if token in SPECIAL_TOKENS.values():
+                        continue
+
+                    ref.append(token)
+
+                references.append(
+                    tgt_tokenizer.decode(ref)
+                )
+
+    bleu = sacrebleu.corpus_bleu(
+        predictions,
+        [references]
+    ).score
+
+    return total_loss / len(loader), bleu
+
 def main():
     print(f"Using device: {DEVICE}")
     os.makedirs("weights", exist_ok=True)
@@ -36,7 +107,15 @@ def main():
 
     # 1. Load Data
     print("Loading opus_books dataset...")
-    raw_dataset = load_dataset("Helsinki-NLP/opus-100", "en-id", split="train[:50000]")
+    raw_dataset = load_dataset("Helsinki-NLP/opus-100", "en-id", split="train[:60000]")
+
+    split = raw_dataset.train_test_split(test_size=0.2, seed=42)
+    train_data = split["train"]
+
+    temp = split["test"].train_test_split(test_size=0.5, seed=42)
+
+    valid_data = temp["train"]
+    test_data = temp["test"] 
 
     # 2. Tokenizer Setup
     src_tokenizer_path = os.path.join(CHECKPOINT_DIR, "src_tokenizer.pkl")
@@ -49,19 +128,30 @@ def main():
     else:
         print("Training tokenizers (this may take a while)...")
         src_tokenizer = RegexTokenizer()
-        src_tokenizer.train(get_corpus_iterator(raw_dataset, "id"), vocab_size=VOCAB_SIZE)
+        src_tokenizer.train(
+            get_corpus_iterator(train_data, "id"),
+            vocab_size=VOCAB_SIZE
+        )
         src_tokenizer.register_special_tokens(SPECIAL_TOKENS)
 
         tgt_tokenizer = RegexTokenizer()
-        tgt_tokenizer.train(get_corpus_iterator(raw_dataset, "en"), vocab_size=VOCAB_SIZE)
+        tgt_tokenizer.train(
+            get_corpus_iterator(train_data, "en"),
+            vocab_size=VOCAB_SIZE
+        )
         tgt_tokenizer.register_special_tokens(SPECIAL_TOKENS)
 
         with open(src_tokenizer_path, "wb") as f: pickle.dump(src_tokenizer, f)
         with open(tgt_tokenizer_path, "wb") as f: pickle.dump(tgt_tokenizer, f)
 
     # 3. Data Loader
-    train_dataset = TranslationDataset(raw_dataset, src_tokenizer, tgt_tokenizer, MAX_LEN)
+    train_dataset = TranslationDataset(train_data, src_tokenizer, tgt_tokenizer, MAX_LEN)
+    valid_dataset = TranslationDataset(valid_data, src_tokenizer, tgt_tokenizer, MAX_LEN)
+    test_dataset = TranslationDataset(test_data, src_tokenizer, tgt_tokenizer, MAX_LEN)
+
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=BATCH_SIZE, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
     # 4. Model Setup
     print("Building Transformer...")
@@ -92,6 +182,7 @@ def main():
 
     # 6. Training Loop
     test_sentences = ["aku suka kamu", "selamat pagi", "terima kasih"]
+    best_bleu = -1
 
     for epoch in range(START_EPOCH, EPOCHS):
         model.train()
@@ -124,12 +215,38 @@ def main():
                 print(f"Epoch {epoch+1} | Batch {batch_idx} | Loss: {loss.item():.4f} | LR: {scheduler.get_last_lr()[0]:.6f}")
 
         avg_loss = total_loss / len(train_loader)
-        print(f"Epoch {epoch+1} Completed | Average Loss: {avg_loss:.4f}")
+        val_loss, bleu = evaluate(model, valid_loader, criterion, src_tokenizer, tgt_tokenizer)
+
+        print(f"Epoch {epoch+1}")
+        print(f"Train Loss : {avg_loss:.4f}")
+        print(f"Validation Loss : {val_loss:.4f}")
+        print(f"BLEU Score      : {bleu:.2f}")
 
         # Sanity check translations
         print("Sanity check:")
         for s in test_sentences:
             print(f"  {s} → {translate(s, model, src_tokenizer, tgt_tokenizer)}")
+
+        if bleu > best_bleu:
+            best_bleu = bleu
+
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "scheduler_state_dict": scheduler.state_dict(),
+                    "train_loss": avg_loss,
+                    "val_loss": val_loss,
+                    "bleu": bleu
+                },
+                os.path.join(
+                    CHECKPOINT_DIR,
+                    "best_model.pt"
+                )
+            )
+
+            print("Best BLEU model saved.")
 
         # Save checkpoint
         new_checkpoint_path = os.path.join(CHECKPOINT_DIR, f"transformer_epoch_{epoch+1}.pt")
@@ -150,6 +267,19 @@ def main():
         for old in old_checkpoints[:-1]:
             os.remove(old)
             print(f"Deleted old checkpoint: {os.path.basename(old)}")
+    
+    print("\nEvaluating best model on test set...")
+
+    checkpoint = torch.load(
+        os.path.join(CHECKPOINT_DIR, "best_model.pt")
+    )
+
+    model.load_state_dict(checkpoint["model_state_dict"])
+
+    test_loss, test_bleu = evaluate(model, test_loader, criterion, src_tokenizer, tgt_tokenizer)
+
+    print(f"Test Loss : {test_loss:.4f}")
+    print(f"Test BLEU : {test_bleu:.2f}")
 
 if __name__ == "__main__":
     main()
