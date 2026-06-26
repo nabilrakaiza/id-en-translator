@@ -107,7 +107,7 @@ def main():
 
     # 1. Load Data
     print("Loading opus_books dataset...")
-    raw_dataset = load_dataset("Helsinki-NLP/opus-100", "en-id", split="train[:60000]")
+    raw_dataset = load_dataset("Helsinki-NLP/opus-100", "en-id", split="train[:50000]")
 
     split = raw_dataset.train_test_split(test_size=0.2, seed=42)
     train_data = split["train"]
